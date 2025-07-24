@@ -1,0 +1,95 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    services:
+      docker:
+        image: docker:20.10.16-dind
+        options: --privileged
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      # Backend: user-service
+      - name: Install user-service dependencies
+        run: |
+          cd backend/user-service
+          pip install -r requirements.txt
+      - name: Test user-service
+        run: |
+          cd backend/user-service
+          python app.py &
+          sleep 5
+          curl http://localhost:5001/users
+
+      # Backend: product-service
+      - name: Install product-service dependencies
+        run: |
+          cd backend/product-service
+          pip install -r requirements.txt
+      - name: Test product-service
+        run: |
+          cd backend/product-service
+          python app.py &
+          sleep 5
+          curl http://localhost:5002/products
+
+      # Frontend
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm install
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run build
+
+      # Docker build
+      - name: Build Docker images
+        run: |
+          docker build -t user-service ./backend/user-service
+          docker build -t product-service ./backend/product-service
+          docker build -t frontend ./frontend
+
+      # Docker Hub login, tag, and push (only on push to main)
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tag and push user-service image
+        if: github.event_name == 'push'
+        run: |
+          docker tag user-service ${{ secrets.DOCKERHUB_USERNAME }}/user-service:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/user-service:latest
+
+      - name: Tag and push product-service image
+        if: github.event_name == 'push'
+        run: |
+          docker tag product-service ${{ secrets.DOCKERHUB_USERNAME }}/product-service:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/product-service:latest
+
+      - name: Tag and push frontend image
+        if: github.event_name == 'push'
+        run: |
+          docker tag frontend ${{ secrets.DOCKERHUB_USERNAME }}/frontend:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/frontend:latest 
